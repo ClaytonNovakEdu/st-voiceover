@@ -1,7 +1,6 @@
 (function () {
     'use strict';
 
-    // Emergency bypass: adding ?vo=off to the URL disables the script immediately
     if (window.location.search.includes('vo=off')) {
         console.log('ST VoiceOver Booster disabled via URL parameter.');
         return;
@@ -44,21 +43,25 @@
         document.head.appendChild(style);
     }
 
-    // 2. Spoken labels for specific SillyTavern button IDs
-    const ID_LABELS = {
-        'send_but': 'Send Message',
-        'options_button': 'Chat Actions Menu (New Chat, Author Note, Regenerate)',
-        'extensionsMenuButton': 'Extensions Quick Menu',
-        'mes_stop': 'Stop Generating Response',
+    // 2. Top-bar Drawer Names (applied ONLY to the clickable .drawer-icon, never the outer wrapper)
+    const DRAWER_LABELS = {
         'ai-config-button': 'AI Response Sliders and Presets Menu',
         'sys-settings-button': 'API Connections Menu',
+        'advanced-formatting-button': 'AI Response Formatting Menu',
         'WI-SP-button': 'World Info and Lorebooks Menu',
         'user-settings-button': 'User Settings Menu',
         'logo_block': 'Backgrounds Menu',
         'extensions-settings-button': 'Extensions Menu',
         'persona-management-button': 'Persona Management Menu',
-        'rightNavHolder': 'Character Management Menu',
-        'rightNavDrawerIcon': 'Character Management Menu',
+        'rightNavHolder': 'Character Management Menu'
+    };
+
+    // 3. Spoken labels for specific leaf button IDs (excluding outer drawer wrappers)
+    const ID_LABELS = {
+        'send_but': 'Send Message',
+        'options_button': 'Chat Actions Menu (New Chat, Author Note, Regenerate)',
+        'extensionsMenuButton': 'Extensions Quick Menu',
+        'mes_stop': 'Stop Generating Response',
         'back_to_characters': 'Back to Character List',
         'create_button': 'Create New Character',
         'delete_button': 'Delete Character',
@@ -84,7 +87,7 @@
         'restore_default_preset': 'Restore Default Preset'
     };
 
-    // 3. Spoken labels for FontAwesome icon classes
+    // 4. Spoken labels for FontAwesome icon classes
     const ICON_LABELS = [
         ['fa-paper-plane', 'Send Message'],
         ['fa-bars', 'Options Menu'],
@@ -102,6 +105,8 @@
         ['fa-cubes', 'Extensions'],
         ['fa-id-card', 'Character Management'],
         ['fa-address-card', 'Character Management'],
+        ['fa-code-branch', 'Update Extension'],
+        ['fa-thumbtack', 'Pin'],
         ['fa-trash-can', 'Delete'],
         ['fa-trash', 'Delete'],
         ['fa-pen-to-square', 'Edit'],
@@ -144,7 +149,7 @@
         ['fa-comments', 'Chat History']
     ];
 
-    // 4. Close the keyboard / unfocus text box when pressing Send
+    // 5. Close the keyboard / unfocus text box when pressing Send
     function setupSendBlurFix() {
         const blurTextarea = () => {
             const ta = document.getElementById('send_textarea');
@@ -162,17 +167,23 @@
         }, true);
     }
 
-    // 5. Isolate background chat from VoiceOver when a menu drawer is open
+    // 6. Isolate background chat from VoiceOver when a menu drawer is open (mobile position:fixed safe)
     function updateMenuIsolation() {
         const allDrawerContents = document.querySelectorAll('.drawer-content');
         let anyDrawerOpen = false;
 
         allDrawerContents.forEach(drawer => {
-            const isOpen = drawer.classList.contains('openDrawer') && drawer.offsetParent !== null;
+            const style = window.getComputedStyle(drawer);
+            const isOpen =
+                drawer.classList.contains('openDrawer') &&
+                !drawer.classList.contains('closedDrawer') &&
+                style.display !== 'none' &&
+                style.visibility !== 'hidden';
+
             if (isOpen) {
                 anyDrawerOpen = true;
-                if (drawer.getAttribute('aria-hidden') !== 'false') {
-                    drawer.setAttribute('aria-hidden', 'false');
+                if (drawer.hasAttribute('aria-hidden')) {
+                    drawer.removeAttribute('aria-hidden');
                 }
             } else {
                 if (drawer.getAttribute('aria-hidden') !== 'true') {
@@ -195,7 +206,7 @@
         }
     }
 
-    // 6. Keep only latest 6 messages visible on screen to eliminate VoiceOver lag
+    // 7. Keep only latest 6 messages visible on screen to eliminate VoiceOver lag
     function updateChatLagLimiter() {
         const chat = document.getElementById('chat');
         if (!chat) return;
@@ -219,7 +230,6 @@
                 lastRenderedHidden = -1;
             }
 
-            // Only update the buttons when counts actually change (prevents loops)
             if (lastRenderedHidden !== hiddenCount || lastRenderedLimit !== visibleMessageLimit) {
                 lastRenderedHidden = hiddenCount;
                 lastRenderedLimit = visibleMessageLimit;
@@ -269,7 +279,7 @@
         });
     }
 
-    // 7. Label individual chat messages, character headings, and swipe/edit buttons
+    // 8. Label individual chat messages, character headings, and swipe/edit buttons
     function enhanceSingleMessage(mes) {
         if (mes.getAttribute('data-vo-mes-ready') === '1') return;
 
@@ -307,7 +317,7 @@
         mes.setAttribute('data-vo-mes-ready', '1');
     }
 
-    // 8. Label Prompt Manager switches, Edit buttons, and Remove buttons
+    // 9. Label Prompt Manager switches, Edit buttons, and Remove buttons
     function enhancePromptManager() {
         const promptRows = document.querySelectorAll('.completion_prompt_manager_prompt, .world_entry');
 
@@ -355,17 +365,48 @@
         });
     }
 
-    // 9. Helper to convert div/span icons into proper VoiceOver buttons
+    // 10. Guard against ever turning outer containers or forms into role="button"
+    function isContainerElement(el) {
+        if (!el) return true;
+        const tag = el.tagName ? el.tagName.toLowerCase() : '';
+        if (tag === 'form' || tag === 'label' || tag === 'select' || tag === 'input' || tag === 'textarea') {
+            return true;
+        }
+        if (
+            el.classList.contains('drawer') ||
+            el.classList.contains('drawer-toggle') ||
+            el.classList.contains('drawer-content') ||
+            el.classList.contains('range-block') ||
+            el.classList.contains('flex-container')
+        ) {
+            return true;
+        }
+        if (el.querySelector('.drawer-content, input, select, textarea, button, .range-block')) {
+            return true;
+        }
+        return false;
+    }
+
     function makeAccessibleButton(el, label) {
         if (!el || !label) return;
+        const tag = el.tagName ? el.tagName.toLowerCase() : '';
+
+        if (tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'button') {
+            if (el.getAttribute('aria-label') !== label) {
+                el.setAttribute('aria-label', label);
+            }
+            return;
+        }
+
+        if (isContainerElement(el)) return;
+
         if (el.getAttribute('aria-label') !== label) {
             el.setAttribute('aria-label', label);
         }
-        const tag = el.tagName.toLowerCase();
-        if (tag !== 'button' && tag !== 'input' && tag !== 'select' && tag !== 'textarea' && !el.getAttribute('role')) {
+        if (!el.getAttribute('role')) {
             el.setAttribute('role', 'button');
         }
-        if (!el.hasAttribute('tabindex') && tag !== 'button' && tag !== 'input') {
+        if (!el.hasAttribute('tabindex')) {
             el.setAttribute('tabindex', '0');
         }
     }
@@ -384,45 +425,61 @@
         return null;
     }
 
-    // 10. Label top bar icons, tooltips, and character cards
+    // 11. Label top bar icons, leaf buttons, and character cards cleanly
     function labelAllControls() {
+        // A. Label the 9 top-bar drawers ONLY on their .drawer-icon (never on the outer .drawer wrapper)
+        document.querySelectorAll('.drawer').forEach((drawer, idx) => {
+            // Strip any accidental button roles from the outer drawer or toggle container
+            drawer.removeAttribute('role');
+            drawer.removeAttribute('tabindex');
+            drawer.removeAttribute('aria-label');
+
+            const toggle = drawer.querySelector('.drawer-toggle');
+            const icon = drawer.querySelector('.drawer-icon');
+            const content = drawer.querySelector('.drawer-content');
+
+            if (toggle && icon && toggle !== icon) {
+                toggle.removeAttribute('role');
+                toggle.removeAttribute('tabindex');
+                toggle.removeAttribute('aria-label');
+            }
+
+            const isOpen = Boolean(content && content.classList.contains('openDrawer'));
+            const target = icon || toggle;
+            if (!target) return;
+
+            const drawerKey = drawer.id || (toggle && toggle.id) || '';
+            const baseLabel =
+                DRAWER_LABELS[drawerKey] ||
+                target.getAttribute('data-st-vo-base') ||
+                target.getAttribute('title') ||
+                (toggle && toggle.getAttribute('title')) ||
+                inferLabelFromIcons(target) ||
+                `Top Menu ${idx + 1}`;
+
+            target.setAttribute('data-st-vo-base', baseLabel);
+            target.setAttribute('aria-label', `${baseLabel} (${isOpen ? 'Expanded' : 'Collapsed'})`);
+            target.setAttribute('role', 'button');
+            target.setAttribute('tabindex', '0');
+            target.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        });
+
+        // B. Label specific leaf buttons by ID
         Object.entries(ID_LABELS).forEach(([id, label]) => {
             const el = document.getElementById(id);
             if (el) makeAccessibleButton(el, label);
         });
 
-        document.querySelectorAll('.drawer').forEach((drawer, idx) => {
-            const toggle = drawer.querySelector('.drawer-toggle');
-            const icon = drawer.querySelector('.drawer-icon');
-            const content = drawer.querySelector('.drawer-content');
-            const isOpen = Boolean(content && content.classList.contains('openDrawer'));
-            const target = icon || toggle;
-
-            if (target) {
-                let baseLabel =
-                    target.getAttribute('data-st-vo-base') ||
-                    ID_LABELS[target.id] ||
-                    ID_LABELS[drawer.id] ||
-                    target.getAttribute('title') ||
-                    (toggle && toggle.getAttribute('title')) ||
-                    inferLabelFromIcons(target) ||
-                    `Top Menu ${idx + 1}`;
-
-                target.setAttribute('data-st-vo-base', baseLabel);
-                makeAccessibleButton(target, `${baseLabel} (${isOpen ? 'Expanded' : 'Collapsed'})`);
-                target.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-            }
-        });
-
-        document.querySelectorAll('[title]:not([data-vo-titled="1"])').forEach(el => {
-            el.setAttribute('data-vo-titled', '1');
+        // C. Convert tooltips ONLY on actual leaf buttons/icons (never on container divs)
+        document.querySelectorAll('.menu_button[title], .fa-solid[title], .fa-regular[title], .fas[title], .far[title], a[title], button[title]').forEach(el => {
+            if (el.classList.contains('drawer-icon') || el.getAttribute('role') === 'switch') return;
             const titleText = (el.getAttribute('title') || '').trim();
-            if (!titleText || el.getAttribute('role') === 'switch') return;
-            if (!el.getAttribute('aria-label')) {
+            if (titleText && !el.getAttribute('aria-label')) {
                 makeAccessibleButton(el, titleText);
             }
         });
 
+        // D. Label unlabeled .menu_button icons using FontAwesome classes
         document.querySelectorAll('.menu_button:not([data-vo-btn="1"])').forEach(el => {
             el.setAttribute('data-vo-btn', '1');
             if (el.getAttribute('aria-label') || el.getAttribute('role') === 'switch') return;
@@ -432,16 +489,19 @@
             if (inferred) makeAccessibleButton(el, inferred);
         });
 
+        // E. Label Character Cards in the Character List
         document.querySelectorAll('.character_select:not([data-vo-char="1"]), .group_select:not([data-vo-char="1"])').forEach(card => {
             const nameEl = card.querySelector('.ch_name');
             if (nameEl && nameEl.textContent.trim()) {
                 card.setAttribute('data-vo-char', '1');
-                makeAccessibleButton(card, `Select Character: ${nameEl.textContent.trim()}`);
+                card.setAttribute('aria-label', `Select Character: ${nameEl.textContent.trim()}`);
+                card.setAttribute('role', 'button');
+                card.setAttribute('tabindex', '0');
             }
         });
     }
 
-    // 11. Safe runner that pauses during AI streaming and prevents recursion
+    // 12. Safe runner
     function runAllEnhancements() {
         if (isRunningEnhancements) return;
         isRunningEnhancements = true;
@@ -460,9 +520,8 @@
     function scheduleEnhancements(delay = 200) {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-            // Skip heavy scans while AI is actively streaming words
             const stopBtn = document.getElementById('mes_stop');
-            if (stopBtn && stopBtn.offsetParent !== null && window.getComputedStyle(stopBtn).display !== 'none') {
+            if (stopBtn && window.getComputedStyle(stopBtn).display !== 'none') {
                 updateChatLagLimiter();
                 return;
             }
@@ -470,7 +529,6 @@
         }, delay);
     }
 
-    // 12. Wait until SillyTavern has 100% finished "Initializing..." before starting
     function waitForSillyTavernReady() {
         const checkInterval = setInterval(() => {
             const preloader = document.getElementById('preloader');
@@ -481,7 +539,6 @@
 
             if (preloaderGone && chat && sendTa) {
                 clearInterval(checkInterval);
-                // Wait an extra 1.5 seconds after startup finishes so settings settle safely
                 setTimeout(startExtension, 1500);
             }
         }, 500);
@@ -492,7 +549,6 @@
         setupSendBlurFix();
         runAllEnhancements();
 
-        // Only watch #chat for new messages added/removed (cannot trigger infinite loops)
         const chat = document.getElementById('chat');
         if (chat) {
             const chatObserver = new MutationObserver(() => {
@@ -503,7 +559,6 @@
             chatObserver.observe(chat, { childList: true });
         }
 
-        // Refresh labels and menu isolation whenever you tap a button or switch
         document.addEventListener('click', () => {
             scheduleEnhancements(120);
             setTimeout(() => scheduleEnhancements(350), 350);
