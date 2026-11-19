@@ -10,6 +10,19 @@
     const DEFAULT_VISIBLE_MESSAGES = 6;
     const STARTUP_SETTLE_DELAY_MS = 1500;
 
+    const CHAT_ACTION_SELECTOR = [
+        '#chat .mes_edit',
+        '#chat .mes_edit_done',
+        '#chat .mes_edit_cancel',
+        '#chat .mes_edit_delete',
+        '#chat .mes_edit_copy',
+        '#chat .mes_button',
+        '#chat .extraMesButtonsHint',
+        '#chat .extraMesButtons > div',
+        '#chat .swipe_left',
+        '#chat .swipe_right'
+    ].join(', ');
+
     let extensionStarted = false;
     let stAppReadyFired = false;
 
@@ -104,7 +117,7 @@
         ['fa-cubes', 'Extensions'],
         ['fa-id-card', 'Character Management'],
         ['fa-address-card', 'Character Management'],
-        ['fa-code-branch', 'Branch or Update'],
+        ['fa-code-branch', 'Update or Switch Branch'],
         ['fa-thumbtack', 'Pin'],
         ['fa-trash-can', 'Delete'],
         ['fa-trash', 'Delete'],
@@ -149,7 +162,7 @@
         ['fa-ellipsis', 'More Actions']
     ];
 
-    // 4. Inject lightweight CSS (never alters SillyTavern drawer display logic)
+    // 4. Inject CSS (eliminates iOS :hover first-tap trap on Edit/message buttons & hides old messages)
     function injectStyles() {
         if (document.getElementById('st-vo-styles')) return;
         const style = document.createElement('style');
@@ -170,6 +183,10 @@
             .group_select,
             .qr--button,
             .list-group-item,
+            .mes_button,
+            .mes_edit,
+            .swipe_left,
+            .swipe_right,
             #send_but,
             #options_button,
             #extensionsMenuButton,
@@ -177,6 +194,34 @@
             [role="button"],
             [role="switch"] {
                 touch-action: manipulation;
+            }
+            /* Prevent iOS Safari from eating the first VoiceOver double-tap as a :hover change */
+            #chat .mes .mes_buttons,
+            #chat .mes:hover .mes_buttons,
+            #chat .mes .mes_edit_buttons {
+                opacity: 1 !important;
+                visibility: visible !important;
+                transition: none !important;
+            }
+            #chat .mes .mes_button,
+            #chat .mes .mes_button:hover,
+            #chat .mes .mes_edit,
+            #chat .mes .mes_edit:hover,
+            #chat .mes .extraMesButtons > div,
+            #chat .mes .extraMesButtons > div:hover,
+            #chat .mes .mes_edit_buttons > div,
+            #chat .mes .mes_edit_buttons > div:hover {
+                opacity: 1 !important;
+                visibility: visible !important;
+                filter: none !important;
+                transition: none !important;
+                padding: 5px;
+                cursor: pointer;
+            }
+            #chat .mes .swipe_left,
+            #chat .mes .swipe_right {
+                transition: none !important;
+                cursor: pointer;
             }
             #st-vo-history-controls {
                 display: flex;
@@ -724,7 +769,7 @@
         }, delay);
     }
 
-    // 11. Enhance visible chat messages, headings, swipe counts, reasoning blocks, and buttons
+    // 11. Enhance visible chat messages, headings, swipe counts, edit mode, and buttons
     function enhanceSingleMessage(mes) {
         const nameEl = mes.querySelector('.ch_name');
         const charName = (nameEl && nameEl.textContent.trim()) || 'Character';
@@ -759,6 +804,11 @@
             reasoningSummary.setAttribute('data-st-vo-reason', '1');
             const summaryText = reasoningSummary.textContent.trim() || 'Thought Process';
             reasoningSummary.setAttribute('aria-label', `AI Reasoning for ${charName}: ${summaryText}`);
+        }
+
+        const editTa = mes.querySelector('textarea.edit_textarea, .mes_block textarea');
+        if (editTa && !editTa.getAttribute('aria-label')) {
+            editTa.setAttribute('aria-label', `Edit Message from ${charName}`);
         }
 
         if (mes.getAttribute('data-vo-mes-ready') === '1') return;
@@ -796,6 +846,58 @@
         if (avatar) avatar.setAttribute('aria-hidden', 'true');
 
         mes.setAttribute('data-vo-mes-ready', '1');
+    }
+
+    // Label and focus the dynamic edit box as soon as Edit opens
+    function enhanceActiveEditMode(mes) {
+        if (!mes || !document.body.contains(mes)) return false;
+        const editTa = mes.querySelector('textarea.edit_textarea, .mes_block textarea');
+        if (!editTa) return false;
+
+        const nameEl = mes.querySelector('.ch_name');
+        const charName = (nameEl && nameEl.textContent.trim()) || 'Character';
+
+        editTa.setAttribute('aria-label', `Edit Message from ${charName}`);
+
+        const editButtonsMap = [
+            ['.mes_edit_done', 'Save Edited Message'],
+            ['.mes_edit_cancel', 'Cancel Editing Message'],
+            ['.mes_edit_delete', 'Delete This Message'],
+            ['.mes_edit_copy', 'Copy Message Text']
+        ];
+        editButtonsMap.forEach(([sel, label]) => {
+            const btn = mes.querySelector(sel);
+            if (btn) makeAccessibleButton(btn, label);
+        });
+
+        if (document.activeElement !== editTa) {
+            focusSafely(editTa, 30);
+        }
+        return true;
+    }
+
+    // Keep chat buttons in the unobstructed middle zone of #chat before double-tap
+    function ensureChatControlInSafeView(el) {
+        const chat = document.getElementById('chat');
+        if (!chat || !el || !chat.contains(el)) return;
+
+        const chatRect = chat.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        if (elRect.width === 0 && elRect.height === 0) return;
+
+        const topBar = document.getElementById('top-bar') || document.getElementById('top-settings-holder');
+        const topBarBottom = topBar ? topBar.getBoundingClientRect().bottom : 0;
+        const formSheld = document.getElementById('form_sheld');
+        const formTop = formSheld ? formSheld.getBoundingClientRect().top : window.innerHeight;
+
+        const safeTop = Math.max(chatRect.top, topBarBottom) + 14;
+        const safeBottom = Math.min(chatRect.bottom, formTop) - 14;
+
+        if (elRect.top < safeTop) {
+            chat.scrollTop -= (safeTop - elRect.top + 24);
+        } else if (elRect.bottom > safeBottom) {
+            chat.scrollTop += (elRect.bottom - safeBottom + 24);
+        }
     }
 
     // 12. Safe button conversion helpers (never converts outer layout wrappers into buttons)
@@ -1123,14 +1225,99 @@
         });
     }
 
-    // 15. Clean Keyboard Blur on Send & Bluetooth Keyboard Support
+    // 15. Interaction Fixes: Single-Tap Edit Rescue, Focus Alignment, Send Blur, and Keyboard Support
     function setupInteractionFixes() {
+        let lastTouchBtn = null;
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchMoved = false;
+
+        // A. Ensure chat message controls are inside unobstructed view as soon as VoiceOver focuses them
+        document.addEventListener('focusin', (e) => {
+            const target = e.target;
+            if (!target || !target.closest) return;
+            const chatBtn = target.closest(CHAT_ACTION_SELECTOR);
+            if (chatBtn) {
+                ensureChatControlInSafeView(chatBtn);
+            }
+        }, true);
+
+        // B. Track touch on Edit and message buttons to rescue swallowed first VoiceOver double-taps
+        document.addEventListener('touchstart', (e) => {
+            const target = e.target;
+            if (!target || !target.closest || !e.touches || e.touches.length !== 1) {
+                lastTouchBtn = null;
+                return;
+            }
+            const btn = target.closest(CHAT_ACTION_SELECTOR);
+            if (btn) {
+                lastTouchBtn = btn;
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                touchMoved = false;
+            } else {
+                lastTouchBtn = null;
+            }
+        }, { capture: true, passive: true });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!lastTouchBtn || !e.touches || e.touches.length !== 1) return;
+            if (
+                Math.abs(e.touches[0].clientX - touchStartX) > 16 ||
+                Math.abs(e.touches[0].clientY - touchStartY) > 16
+            ) {
+                touchMoved = true;
+            }
+        }, { capture: true, passive: true });
+
+        document.addEventListener('touchend', () => {
+            const btn = lastTouchBtn;
+            lastTouchBtn = null;
+            if (!btn || touchMoved) return;
+
+            setTimeout(() => {
+                if (!document.body.contains(btn) || btn.inert) return;
+                if (Date.now() - (btn._stVoNativeClickTs || 0) < 250) return;
+
+                if (btn.classList.contains('mes_edit')) {
+                    const mes = btn.closest('.mes');
+                    if (mes && mes.querySelector('textarea.edit_textarea, .mes_block textarea')) return;
+                }
+
+                btn._stVoRescueTs = Date.now();
+                btn._stVoNativeClickTs = Date.now();
+                btn._stVoSyntheticClick = true;
+                btn.click();
+            }, 85);
+        }, { capture: true, passive: true });
+
+        // C. Capture-phase click guard to block late duplicate ghost clicks after a rescue click
+        document.addEventListener('click', (e) => {
+            const target = e.target;
+            if (!target || !target.closest) return;
+            const chatBtn = target.closest(CHAT_ACTION_SELECTOR);
+            if (!chatBtn) return;
+
+            if (chatBtn._stVoSyntheticClick) {
+                chatBtn._stVoSyntheticClick = false;
+                return;
+            }
+            if (Date.now() - (chatBtn._stVoRescueTs || 0) < 400) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                return;
+            }
+            chatBtn._stVoNativeClickTs = Date.now();
+        }, true);
+
+        // D. Main bubble click listener for Edit focus flow, Send blur, and menu trigger tracking
         document.addEventListener('click', (e) => {
             const target = e.target;
             if (!target || !target.closest) return;
 
-            // Record the main-screen button that opened a menu so focus returns cleanly on close
-            const topDrawerIcon = target.closest('#top-settings-holder .drawer-icon, #top-settings-holder .drawer-toggle, #top-bar .drawer-icon, #top-bar .drawer-toggle');
+            const topDrawerIcon = target.closest(
+                '#top-settings-holder .drawer-icon, #top-settings-holder .drawer-toggle, #top-bar .drawer-icon, #top-bar .drawer-toggle'
+            );
             if (topDrawerIcon) {
                 lastTriggerElement = topDrawerIcon;
             } else if (!activePrimaryOverlay) {
@@ -1145,6 +1332,52 @@
                 const ta = document.getElementById('send_textarea');
                 if (ta && document.activeElement === ta) {
                     setTimeout(() => ta.blur(), 40);
+                }
+            }
+
+            // Handle opening Message Edit mode cleanly for VoiceOver
+            const editTrigger = target.closest('#chat .mes_edit');
+            if (editTrigger) {
+                const mes = editTrigger.closest('.mes');
+                if (mes) {
+                    setTimeout(() => {
+                        if (!enhanceActiveEditMode(mes)) {
+                            setTimeout(() => enhanceActiveEditMode(mes), 160);
+                        }
+                    }, 70);
+                }
+            }
+
+            // Keep VoiceOver right on the message when saving or cancelling an edit
+            const finishEditBtn = target.closest('#chat .mes_edit_done, #chat .mes_edit_cancel');
+            if (finishEditBtn) {
+                const mes = finishEditBtn.closest('.mes');
+                const isSave = Boolean(finishEditBtn.closest('.mes_edit_done'));
+                if (mes) {
+                    setTimeout(() => {
+                        const nameEl = mes.querySelector('.ch_name');
+                        if (nameEl) {
+                            nameEl.setAttribute('tabindex', '-1');
+                            focusSafely(nameEl, 30);
+                        }
+                        announce(isSave ? 'Message edit saved.' : 'Message edit cancelled.');
+                    }, 110);
+                }
+            }
+
+            // Label and focus extra message actions when expanding the three-dots hint
+            const extraHint = target.closest('#chat .extraMesButtonsHint');
+            if (extraHint) {
+                const mes = extraHint.closest('.mes');
+                if (mes) {
+                    setTimeout(() => {
+                        mes.removeAttribute('data-vo-mes-ready');
+                        enhanceSingleMessage(mes);
+                        const firstExtra = mes.querySelector('.extraMesButtons > div');
+                        if (firstExtra && isElementVisible(firstExtra)) {
+                            focusSafely(firstExtra, 40);
+                        }
+                    }, 150);
                 }
             }
 
